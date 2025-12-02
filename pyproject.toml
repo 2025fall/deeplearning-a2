@@ -19,3 +19,14 @@ dependencies = [
     "transformers>=4.57.1",
     "trl>=0.24.0",
 ]
+
+[tool.setuptools]
+py-modules = [
+    "constants",
+    "dataset",
+    "evaluation",
+    "main",
+    "model",
+    "trainer",
+    "utils",
+]
