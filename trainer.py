@@ -1,3 +1,5 @@
+import inspect
+
 from transformers import DataCollatorForSeq2Seq, Seq2SeqTrainer, Seq2SeqTrainingArguments, Trainer, TrainingArguments
 
 from constants import MAX_TARGET_LENGTH, OUTPUT_DIR
@@ -15,7 +17,7 @@ def create_training_arguments() -> TrainingArguments:
     # Below is an example of how to create training arguments. You are free to change this.
     # ref: https://huggingface.co/transformers/main_classes/trainer.html#transformers.TrainingArguments
     """
-    training_args = Seq2SeqTrainingArguments(
+    kwargs = dict(
         output_dir=OUTPUT_DIR,
         num_train_epochs=2,
         per_device_train_batch_size=4,
@@ -25,7 +27,6 @@ def create_training_arguments() -> TrainingArguments:
         warmup_ratio=0.05,
         logging_steps=200,
         save_steps=2000,
-        evaluation_strategy="steps",
         eval_steps=2000,
         save_total_limit=2,
         load_best_model_at_end=True,
@@ -40,6 +41,14 @@ def create_training_arguments() -> TrainingArguments:
         gradient_checkpointing=True,
         label_smoothing_factor=0.1,
     )
+
+    sig_params = inspect.signature(Seq2SeqTrainingArguments.__init__).parameters
+    if "evaluation_strategy" in sig_params:
+        kwargs["evaluation_strategy"] = "steps"
+    elif "eval_strategy" in sig_params:
+        kwargs["eval_strategy"] = "steps"
+
+    training_args = Seq2SeqTrainingArguments(**kwargs)
 
     return training_args
 
@@ -73,8 +82,26 @@ class _SafeSeq2SeqTrainer(Seq2SeqTrainer):
 
     def prepare_inputs(self, inputs):
         inputs = super().prepare_inputs(inputs)
+        # Drop decoder_inputs_embeds defensively to avoid conflicts in m2m100 forward.
         inputs.pop("decoder_inputs_embeds", None)
         return inputs
+
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        # Ensure decoder_inputs_embeds is not forwarded alongside decoder_input_ids.
+        inputs = dict(inputs)
+        inputs.pop("decoder_inputs_embeds", None)
+        return super().compute_loss(model, inputs, return_outputs=return_outputs, num_items_in_batch=num_items_in_batch)
+
+    def prediction_step(
+        self,
+        model,
+        inputs,
+        prediction_loss_only,
+        ignore_keys=None,
+    ):
+        inputs = dict(inputs)
+        inputs.pop("decoder_inputs_embeds", None)
+        return super().prediction_step(model, inputs, prediction_loss_only, ignore_keys)
 
 
 def build_trainer(model, tokenizer, tokenized_datasets) -> Trainer:
