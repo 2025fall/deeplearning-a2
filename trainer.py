@@ -57,7 +57,24 @@ def create_data_collator(tokenizer, model):
 
     NOTE: You are free to change this. But make sure the data collator is the same as the model.
     """
-    return DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model)
+    base_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model)
+
+    def collate_fn(features):
+        batch = base_collator(features)
+        # Some environments/models may surface decoder_inputs_embeds; ensure only decoder_input_ids are used.
+        batch.pop("decoder_inputs_embeds", None)
+        return batch
+
+    return collate_fn
+
+
+class _SafeSeq2SeqTrainer(Seq2SeqTrainer):
+    """Drop decoder_inputs_embeds if it slips into the batch."""
+
+    def prepare_inputs(self, inputs):
+        inputs = super().prepare_inputs(inputs)
+        inputs.pop("decoder_inputs_embeds", None)
+        return inputs
 
 
 def build_trainer(model, tokenizer, tokenized_datasets) -> Trainer:
@@ -77,7 +94,7 @@ def build_trainer(model, tokenizer, tokenized_datasets) -> Trainer:
     data_collator = create_data_collator(tokenizer, model)
     training_args: TrainingArguments = create_training_arguments()
 
-    return Seq2SeqTrainer(
+    return _SafeSeq2SeqTrainer(
         model=model,
         args=training_args,
         train_dataset=tokenized_datasets["train"],
